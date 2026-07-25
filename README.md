@@ -105,6 +105,24 @@ an embedded raster symbol. They cover model serialization, coordinate
 round-trips, extraction, masks, residual subtraction, adapter artifacts, and
 both API endpoints.
 
+## System Dependencies
+
+The project supports DWG ingestion through a DWG-to-DXF conversion step.
+
+### macOS
+
+Install LibreDWG using Homebrew:
+
+```bash
+brew install libredwg
+which dwg2dxf
+dwg2dxf --version
+```
+
+The DWG ingestion pipeline uses the converter to transform:
+
+.dwg → .dxf → ezdxf → canonical document representation
+
 ## Current limitations and trade-offs
 
 - Native PDFs must contain exactly one page. Multi-page aggregation is deferred.
@@ -119,6 +137,9 @@ both API endpoints.
   debugging and future reprocessing.
 - Embedded raster images are intentionally residual; they are not OCRed or
   interpreted during ingestion.
+-Not able to show the raster for the .dwg files. Since I am unable to convert them to 
+.png image files
+
 
 The delta aligner, text/geometry/residual comparison engine, report renderer,
 chat index, and provider-neutral `VisualInterpreter` are interfaces only.

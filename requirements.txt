@@ -12,3 +12,4 @@ uvicorn[standard]>=0.34
 google-genai
 python-dotenv
 langsmith==0.10.10
+ezdxf>=1.3
