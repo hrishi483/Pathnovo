@@ -29,9 +29,6 @@ env/
 converted/
 output/
 reports/
-data/artifacts/baseline/
-data/artifacts/delta/
-data/artifacts/revision/
 
 # Build artifacts
 dist/
