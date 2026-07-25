@@ -7,6 +7,11 @@ from src.ingest.base import FormatAdapter
 
 
 class ScannedPdfAdapter(FormatAdapter):
+    @property
+    def extensions(self) -> frozenset[str]:
+        # Reserved for a future OCR path; never matches while unimplemented.
+        return frozenset()
+
     def can_handle(self, file_path: Path) -> bool:
         return False
 

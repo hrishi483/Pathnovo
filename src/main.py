@@ -21,6 +21,8 @@ from src.canonical.model import DocumentCanonicalRepresentation
 from src.chat.agent import DeltaAgent
 from src.chat.artifacts import discover_pairs
 from src.delta.compare import DocumentComparer
+from src.ingest.base import AdapterRegistry, FormatAdapter
+from src.ingest.dwg import DwgAdapter, DwgConfig
 from src.ingest.pdf_native import NativePdfAdapter, NativePdfConfig
 from src.observability.logging import configure_logging
 from src.viewer.reports import discover_reports, resolve_image_file, resolve_report_file
@@ -46,6 +48,8 @@ class ChatResponse(BaseModel):
     document_pair_id: str
     answer: str
     tool_calls: list[dict[str, Any]]
+    usage_metadata: dict[str, Any] | None = None
+    model: str | None = None
 
 
 def _output_root() -> Path:
@@ -67,24 +71,47 @@ def _get_or_create_agent(
     cache[resolved_pair_id] = agent
     return agent, resolved_pair_id
 
+def _default_adapter_registry() -> AdapterRegistry:
+    zoom = float(os.getenv("DELTA_CHAT_RENDER_ZOOM", "2.0"))
+    return AdapterRegistry(
+        [
+            NativePdfAdapter(
+                NativePdfConfig(
+                    zoom=zoom,
+                    min_residual_area=int(
+                        os.getenv("DELTA_CHAT_MIN_RESIDUAL_AREA", "64")
+                    ),
+                )
+            ),
+            DwgAdapter(DwgConfig(zoom=zoom)),
+        ]
+    )
+
+
 async def _extract_canonical_from_upload(
     upload: UploadFile,
-    pdf_adapter: NativePdfAdapter,
+    registry: AdapterRegistry,
     output_root: Path,
     *,
     label: str = "upload",
 ) -> DocumentCanonicalRepresentation:
-    suffix = Path(upload.filename or "").suffix.lower()
-    if suffix != ".pdf":
+    filename = Path(upload.filename or "input.bin").name
+    try:
+        adapter = registry.resolve_for_filename(filename)
+    except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail="Only PDF files are currently supported",
-        )
+            detail=str(exc),
+        ) from exc
 
     output_root.mkdir(parents=True, exist_ok=True)
-    filename = Path(upload.filename or "input.pdf").name
     started = time.perf_counter()
-    logger.info("ingest[%s] start filename=%s", label, filename)
+    logger.info(
+        "ingest[%s] start filename=%s adapter=%s",
+        label,
+        filename,
+        type(adapter).__name__,
+    )
 
     with tempfile.TemporaryDirectory(prefix="delta-chat-") as temporary:
         upload_path = Path(temporary) / filename
@@ -103,7 +130,7 @@ async def _extract_canonical_from_upload(
 
         extract_started = time.perf_counter()
         canonical = await run_in_threadpool(
-            pdf_adapter.extract_canonical, upload_path, output_root
+            adapter.extract_canonical, upload_path, output_root
         )
         logger.info(
             "ingest[%s] extract done document_id=%s text=%s geometry=%s "
@@ -119,7 +146,7 @@ async def _extract_canonical_from_upload(
 
 
 def create_app(
-    adapter: NativePdfAdapter | None = None,
+    adapter: FormatAdapter | AdapterRegistry | None = None,
     comparer: DocumentComparer | None = None,
 ) -> FastAPI:
     configure_logging()
@@ -128,14 +155,12 @@ def create_app(
         version="0.1.0",
         description="Loss-aware canonical extraction for engineering documents",
     )
-    pdf_adapter = adapter or NativePdfAdapter(
-        NativePdfConfig(
-            zoom=float(os.getenv("DELTA_CHAT_RENDER_ZOOM", "2.0")),
-            min_residual_area=int(
-                os.getenv("DELTA_CHAT_MIN_RESIDUAL_AREA", "64")
-            ),
-        )
-    )
+    if isinstance(adapter, AdapterRegistry):
+        registry = adapter
+    elif adapter is not None:
+        registry = AdapterRegistry([adapter])
+    else:
+        registry = _default_adapter_registry()
     document_comparer = comparer or DocumentComparer()
     agent_cache: dict[str, DeltaAgent] = {}
     app.mount("/static", StaticFiles(directory=STATIC_ROOT), name="static")
@@ -203,6 +228,8 @@ def create_app(
             document_pair_id=pair_id,
             answer=result["answer"],
             tool_calls=result["tool_calls"],
+            usage_metadata=result.get("usage_metadata"),
+            model=result.get("model"),
         )
 
     @app.get("/api/reports")
@@ -242,7 +269,7 @@ def create_app(
         output_root = _output_root()
         try:
             canonical = await _extract_canonical_from_upload(
-                file, pdf_adapter, output_root
+                file, registry, output_root
             )
         except (ValueError, RuntimeError) as exc:
             raise HTTPException(
@@ -273,12 +300,12 @@ def create_app(
         try:
             baseline_output_path = output_root / "baseline"
             baseline_canonical = await _extract_canonical_from_upload(
-                baseline, pdf_adapter, baseline_output_path, label="baseline"
+                baseline, registry, baseline_output_path, label="baseline"
             )
 
             revision_output_path = output_root / "revision"
             revision_canonical = await _extract_canonical_from_upload(
-                revision, pdf_adapter, revision_output_path, label="revision"
+                revision, registry, revision_output_path, label="revision"
             )
             logger.info(
                 "compare alignment start baseline_id=%s revision_id=%s "

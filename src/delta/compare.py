@@ -16,13 +16,15 @@ from src.delta.geometryalign import GeometryAligner
 
 logger = logging.getLogger(__name__)
 
+_CAD_SOURCE_FORMATS = frozenset({"dwg", "dxf"})
+
+
+def _is_cad_document(document: DocumentCanonicalRepresentation) -> bool:
+    return document.source_format.lower() in _CAD_SOURCE_FORMATS
+
 
 class DocumentComparer(DeltaEngine):
-    """Compare baseline and revision canonical documents.
-
-    Text alignment is implemented today. Geometry and residual-mask comparison
-    can be added alongside ``text`` in ``compare`` when those aligners exist.
-    """
+    """Compare baseline and revision canonical documents via text + geometry."""
 
     def __init__(
         self,
@@ -32,7 +34,8 @@ class DocumentComparer(DeltaEngine):
     ) -> None:
         self._text_aligner = text_aligner or TextAligner()
         self._geometry_aligner = geometry_aligner or GeometryAligner()
-        self._vlm_aligner = vlm_aligner or VLMDeltaAnalyzer()
+        self._vlm_aligner = vlm_aligner
+
     def compare(
         self,
         baseline: DocumentCanonicalRepresentation,
@@ -106,56 +109,75 @@ class DocumentComparer(DeltaEngine):
             time.perf_counter() - write_started,
         )
 
+        statistics: dict[str, Any] = {
+            "text": text_comparison["summary"],
+            "geometry": geometry_comparison["summary"],
+        }
 
-        # VLM comparison with difference analysis
-        vlm_started = time.perf_counter()
-        vlm_comparison_with_difference_analysis = self._vlm_aligner.compare(
-            baseline_image_path=baseline.metadata["artifacts"]["geometry_mask"],
-            revision_image_path=revision.metadata["artifacts"]["geometry_mask"],
-            output_dir=results_dir
-        )
-        logger.info(
-            "vlm align done elapsed=%.3fs summary=%s",
-            time.perf_counter() - vlm_started,
-            vlm_comparison_with_difference_analysis.get("summary"),
-        )
-
-        vlm_comparison_path = (
-            results_dir
-            / f"{baseline.document_id}-{revision.document_id}_vlm_with_difference_analysis.json"
-        )
-        write_started = time.perf_counter()
-        vlm_comparison_path.write_text(
-            json.dumps(vlm_comparison_with_difference_analysis, indent=2),
-            encoding="utf-8",
-        )
+        # CAD (.dwg/.dxf): text + geometry only. VLM is not used.
+        if _is_cad_document(baseline) or _is_cad_document(revision):
+            logger.info(
+                "VLM disabled for CAD compare baseline_format=%s revision_format=%s",
+                baseline.source_format,
+                revision.source_format,
+            )
+        else:
+            statistics["vlm_with_difference_analysis"] = self._run_vlm(
+                label="vlm_with_difference_analysis",
+                results_dir=results_dir,
+                runner=lambda: self._get_vlm_aligner().compare(
+                    baseline_image_path=baseline.metadata["artifacts"]["geometry_mask"],
+                    revision_image_path=revision.metadata["artifacts"]["geometry_mask"],
+                    output_dir=results_dir,
+                ),
+                filename=(
+                    f"{baseline.document_id}-{revision.document_id}"
+                    "_vlm_with_difference_analysis.json"
+                ),
+            )
+            statistics["vlm"] = self._run_vlm(
+                label="vlm",
+                results_dir=results_dir,
+                runner=lambda: self._get_vlm_aligner().compare_with_gemini(
+                    baseline_image_path=baseline.metadata["artifacts"]["geometry_mask"],
+                    revision_image_path=revision.metadata["artifacts"]["geometry_mask"],
+                ),
+                filename=(
+                    f"{baseline.document_id}-{revision.document_id}_vlm_comparison.json"
+                ),
+            )
 
         logger.info(
             "DocumentComparer.compare complete total_elapsed=%.3fs",
             time.perf_counter() - started,
         )
-
-        # VLM comparison with Gemini
-        vlm_comparison = self._vlm_aligner.compare_with_gemini(
-            baseline_image_path=baseline.metadata["artifacts"]["geometry_mask"],
-            revision_image_path=revision.metadata["artifacts"]["geometry_mask"],
-        )
-        vlm_comparison_path = (
-            results_dir
-            / f"{baseline.document_id}-{revision.document_id}_vlm_comparison.json"
-        )
-        write_started = time.perf_counter()
-        vlm_comparison_path.write_text(
-            json.dumps(vlm_comparison, indent=2),
-            encoding="utf-8",
-        )
         return {
             "baseline_document_id": baseline.document_id,
             "revision_document_id": revision.document_id,
-            "statistics": {
-                "text": text_comparison["summary"],
-                "geometry": geometry_comparison["summary"],
-                "vlm_with_difference_analysis": vlm_comparison_with_difference_analysis,
-                "vlm": vlm_comparison,
-            },
+            "statistics": statistics,
         }
+
+    def _get_vlm_aligner(self) -> VLMDeltaAnalyzer:
+        if self._vlm_aligner is None:
+            self._vlm_aligner = VLMDeltaAnalyzer()
+        return self._vlm_aligner
+
+    def _run_vlm(
+        self,
+        *,
+        label: str,
+        results_dir: Path,
+        runner,
+        filename: str,
+    ) -> dict[str, Any]:
+        started = time.perf_counter()
+        result = runner()
+        logger.info(
+            "%s done elapsed=%.3fs summary=%s",
+            label,
+            time.perf_counter() - started,
+            result.get("summary") if isinstance(result, dict) else None,
+        )
+        path = results_dir / filename
+        path.write_text(json.dumps(result, indent=2), encoding="utf-8")
+        return result

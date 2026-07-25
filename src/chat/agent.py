@@ -1,20 +1,25 @@
 from __future__ import annotations
- 
-import json
+
 import os
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
- 
+from langsmith import traceable
+
 from .artifacts import build_store_from_artifacts
 from .store import DeltaStore
 from .tools import GEMINI_TOOL_DECLARATIONS, dispatch_tool
-from langsmith import traceable
+from .tracing import (
+    attach_usage_to_current_run,
+    merge_usage,
+    usage_from_gemini_response,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(PROJECT_ROOT / ".env")
- 
+
 SYSTEM_PROMPT = """You are a grounded document comparison and change analysis agent.
 
     Your task is to answer questions about:
@@ -218,20 +223,39 @@ SYSTEM_PROMPT = """You are a grounded document comparison and change analysis ag
 
     Never fabricate an answer simply because the user expects one.
     """
- 
- 
+
+
+def _preview_gemini_response(response: Any) -> str:
+    function_calls = getattr(response, "function_calls", None) or []
+    if function_calls:
+        names = [getattr(call, "name", "?") for call in function_calls]
+        return f"function_calls={names}"
+    return getattr(response, "text", None) or ""
+
+
+def _llm_process_outputs(output: Any) -> dict[str, Any]:
+    """Map a Gemini response into LangSmith llm-run outputs (incl. tokens)."""
+    usage = usage_from_gemini_response(output)
+    payload: dict[str, Any] = {
+        "output": _preview_gemini_response(output),
+    }
+    if usage:
+        payload["usage_metadata"] = usage
+    return payload
+
+
 class DeltaAgent:
     """Manual function-calling loop against Gemini, matching the pattern in
     https://ai.google.dev/gemini-api/docs/generate-content/function-calling
     (Step 1-4 + "compositional function calling" example), adapted to a
     fixed toolset shared with tools.py.
- 
+
     Automatic function calling (passing plain Python functions as `tools`)
     isn't used here because our tools need a bound `DeltaStore`; a manual
     loop keeps that dependency explicit and makes each tool call/result
     pair inspectable, which is convenient while developing the demo.
     """
- 
+
     def __init__(
         self,
         store: DeltaStore,
@@ -255,13 +279,12 @@ class DeltaAgent:
             artifact_root, document_pair_id
         )
         return cls(store, **agent_options), resolved_pair_id
-    
 
     @property
     def client(self):
         if self._client is None:
             from google import genai  # local import so the module loads without the dependency
- 
+
             api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get(
                 "GEMINI_API_KEY"
             )
@@ -271,16 +294,30 @@ class DeltaAgent:
                 )
             self._client = genai.Client(api_key=api_key)
         return self._client
- 
+
     def ask(self, document_pair_id: str, question: str) -> str:
         return self.ask_with_trace(document_pair_id, question)["answer"]
 
     @traceable(
-        name="Agent",
-        run_type="llm",
+        name="DeltaAgent.ask",
+        run_type="chain",
+        tags=["delta-chat", "agent"],
+        metadata={"component": "DeltaAgent"},
+        process_inputs=lambda inputs: {
+            "document_pair_id": inputs.get("document_pair_id"),
+            "question": inputs.get("question"),
+            "model": getattr(inputs.get("self"), "model", None),
+        },
     )
     def ask_with_trace(self, document_pair_id: str, question: str) -> dict:
-        """Run the tool loop and return the answer plus inspectable tool calls."""
+        """Run the tool loop and return the answer plus inspectable tool calls.
+
+        Trace layout in LangSmith:
+        - DeltaAgent.ask → chain
+          - Gemini.generate_content → llm (input/output tokens)
+          - dispatch_tool → chain
+            - Find Entities / ... → tool
+        """
         from google.genai import types
 
         tools = [types.Tool(function_declarations=GEMINI_TOOL_DECLARATIONS)]
@@ -293,25 +330,37 @@ class DeltaAgent:
                 role="user",
                 parts=[
                     types.Part(
-                        text=f"document_pair_id: {document_pair_id}\n\nQuestion: {question}"
+                        text=(
+                            f"document_pair_id: {document_pair_id}\n\n"
+                            f"Question: {question}"
+                        )
                     )
                 ],
             )
         ]
         tool_calls: list[dict] = []
+        usage_total: dict[str, Any] = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+        }
 
-        for _ in range(self.max_tool_iterations):
-            response = self.client.models.generate_content(
-                model=self.model,
+        for turn in range(self.max_tool_iterations):
+            response = self._generate_content(
                 contents=contents,
                 config=config,
+                turn=turn,
             )
+            usage_total = merge_usage(usage_total, usage_from_gemini_response(response))
 
             function_calls = response.function_calls or []
             if not function_calls:
+                attach_usage_to_current_run(usage_total)
                 return {
                     "answer": response.text or "",
                     "tool_calls": tool_calls,
+                    "usage_metadata": usage_total,
+                    "model": self.model,
                 }
 
             # Echo the model's turn (including function_call parts and any
@@ -341,7 +390,52 @@ class DeltaAgent:
                 )
             contents.append(types.Content(role="user", parts=response_parts))
 
+        attach_usage_to_current_run(usage_total)
         return {
             "answer": "I couldn't reach a final answer within the tool-call budget.",
             "tool_calls": tool_calls,
+            "usage_metadata": usage_total,
+            "model": self.model,
         }
+
+    @traceable(
+        name="Gemini.generate_content",
+        run_type="llm",
+        tags=["delta-chat", "gemini", "llm"],
+        process_inputs=lambda inputs: {
+            "model": getattr(inputs.get("self"), "model", None),
+            "turn": inputs.get("turn"),
+            "message_count": len(inputs.get("contents") or []),
+        },
+        process_outputs=_llm_process_outputs,
+    )
+    def _generate_content(self, *, contents: list, config: Any, turn: int = 0) -> Any:
+        """One Gemini API turn.
+
+        Returning ``usage_metadata`` via ``process_outputs`` is what lets
+        LangSmith show input/output token counts on this llm run. Also set
+        ``ls_provider`` / ``ls_model_name`` so cost tracking can resolve pricing.
+        """
+        try:
+            from langsmith.run_helpers import get_current_run_tree
+
+            run_tree = get_current_run_tree()
+            if run_tree is not None:
+                metadata = dict(run_tree.extra.get("metadata") or {})
+                metadata.update(
+                    {
+                        "ls_provider": "google_genai",
+                        "ls_model_name": self.model,
+                        "ls_model_type": "chat",
+                        "turn": turn,
+                    }
+                )
+                run_tree.extra["metadata"] = metadata
+        except Exception:
+            pass
+
+        return self.client.models.generate_content(
+            model=self.model,
+            contents=contents,
+            config=config,
+        )

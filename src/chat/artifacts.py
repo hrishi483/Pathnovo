@@ -460,14 +460,18 @@ def build_store_from_artifacts(
 
     text_report = _read_json(result_dir / f"{pair_id}_text.json")
     geometry_report = _read_json(result_dir / f"{pair_id}_geometry.json")
-    vlm_report = _read_json(result_dir / f"{pair_id}_vlm_comparison.json")
     _load_text_changes(store, pair_id, text_report)
     _load_geometry_changes(store, pair_id, geometry_report)
-    _load_vlm_changes(
-        store,
-        pair_id,
-        vlm_report,
-        float(text_report["revision_b"]["page_width"]),
-        float(text_report["revision_b"]["page_height"]),
-    )
+
+    # VLM is optional (e.g. CAD/.dwg compares skip it entirely).
+    vlm_path = result_dir / f"{pair_id}_vlm_comparison.json"
+    if vlm_path.is_file():
+        vlm_report = _read_json(vlm_path)
+        _load_vlm_changes(
+            store,
+            pair_id,
+            vlm_report,
+            float(text_report["revision_b"]["page_width"]),
+            float(text_report["revision_b"]["page_height"]),
+        )
     return store, pair_id

@@ -40,10 +40,12 @@ class BoundingBox(BaseModel):
 class TextSource(str, Enum):
     PDF_NATIVE = "pdf_native"
     OCR = "ocr"
+    DWG = "dwg"
 
 
 class GeometrySource(str, Enum):
     PDF_NATIVE = "pdf_native"
+    DWG = "dwg"
 
 
 class ResidualSource(str, Enum):
@@ -128,5 +130,5 @@ class DocumentCanonicalRepresentation(BaseModel):
                 or box.x1 > self.page_width + tolerance
                 or box.y1 > self.page_height + tolerance
             ):
-                raise ValueError(f"{element.id} bounding box lies outside the PDF page")
+                raise ValueError(f"{element.id} bounding box lies outside the page")
         return self

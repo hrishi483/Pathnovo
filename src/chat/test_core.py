@@ -142,10 +142,12 @@ def test_get_overall_changes_reads_report_summaries():
     result = get_overall_changes(store, pair_id)
     assert "error" not in result
     kinds = {source["kind"] for source in result["sources"]}
-    assert {"text", "geometry", "vlm_comparison"} <= kinds
-    vlm = next(s for s in result["sources"] if s["kind"] == "vlm_comparison")
-    assert vlm["summary"]["overall_summary"]
-    assert vlm["changes"]
+    # Text + geometry are always present; VLM is optional for CAD pairs.
+    assert {"text", "geometry"} <= kinds
+    if "vlm_comparison" in kinds:
+        vlm = next(s for s in result["sources"] if s["kind"] == "vlm_comparison")
+        assert vlm["summary"]["overall_summary"]
+        assert vlm["changes"]
 
 
 def test_get_overall_changes_requires_artifact_root():

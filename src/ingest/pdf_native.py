@@ -54,8 +54,9 @@ class NativePdfAdapter(FormatAdapter):
     def __init__(self, config: NativePdfConfig | None = None) -> None:
         self.config = config or NativePdfConfig()
 
-    def can_handle(self, file_path: Path) -> bool:
-        return file_path.is_file() and file_path.suffix.lower() == ".pdf"
+    @property
+    def extensions(self) -> frozenset[str]:
+        return frozenset({".pdf"})
 
     def extract_canonical(
         self, file_path: Path, output_dir: Path

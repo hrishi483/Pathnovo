@@ -3,11 +3,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any, Optional
+
 from langsmith import traceable
+
 from .models import ChangeType
 from .store import DeltaStore
- 
- 
+from .tracing import strip_store_from_inputs
+
+
 def _parse_change_type(value: Optional[str]) -> Optional[ChangeType]:
     if value is None:
         return None
@@ -19,9 +22,11 @@ def _parse_change_type(value: Optional[str]) -> Optional[ChangeType]:
             f"Invalid change_type {value!r}; expected one of: {valid}"
         ) from exc
 
+
 @traceable(
     name="Find Entities",
     run_type="tool",
+    process_inputs=strip_store_from_inputs,
 )
 def find_entities(
     store: DeltaStore,
@@ -58,6 +63,7 @@ def find_entities(
 @traceable(
     name="Get Nearby Entities",
     run_type="tool",
+    process_inputs=strip_store_from_inputs,
 )
 def get_nearby_entities(
     store: DeltaStore,
@@ -83,6 +89,7 @@ def get_nearby_entities(
 @traceable(
     name="Get Entity Neighborhood",
     run_type="tool",
+    process_inputs=strip_store_from_inputs,
 )
 def get_entity_neighborhood(
     store: DeltaStore,
@@ -112,6 +119,7 @@ def get_entity_neighborhood(
 @traceable(
     name="Get Nearby Changes",
     run_type="tool",
+    process_inputs=strip_store_from_inputs,
 )
 def get_nearby_changes(
     store: DeltaStore,
@@ -147,6 +155,7 @@ def get_nearby_changes(
 @traceable(
     name="Get Entity Changes",
     run_type="tool",
+    process_inputs=strip_store_from_inputs,
 )
 def get_entity_changes(store: DeltaStore, entity_id: str, change_type: Optional[str] = None) -> dict:
     """Get all changes directly tied to a specific entity (its own moves,
@@ -224,6 +233,7 @@ def _read_report_summary(path: Path) -> dict[str, Any]:
 @traceable(
     name="Get Overall Changes",
     run_type="tool",
+    process_inputs=strip_store_from_inputs,
 )
 def get_overall_changes(store: DeltaStore, document_pair_id: str) -> dict:
     """Read text, geometry, and VLM report summaries for a document pair.
@@ -453,6 +463,14 @@ GEMINI_TOOL_DECLARATIONS = [
 ]
  
  
+@traceable(
+    name="dispatch_tool",
+    run_type="chain",
+    process_inputs=lambda inputs: {
+        "name": inputs.get("name"),
+        "tool_input": inputs.get("tool_input"),
+    },
+)
 def dispatch_tool(store: DeltaStore, name: str, tool_input: dict):
     """Route a tool_use block from the LLM to the matching Python function."""
     try:
