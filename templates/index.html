@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document Delta Viewer</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="header">
+        <div>
+          <h1>Document Delta Viewer</h1>
+          <p id="doc-ids">Baseline - Revision</p>
+        </div>
+        <div class="header-actions">
+          <a class="nav-link" href="/chat">Chat Agent</a>
+          <div class="run-picker">
+            <label for="run-select">Comparison Run</label>
+            <select id="run-select"></select>
+          </div>
+        </div>
+      </header>
+
+      <section class="tabs" aria-label="Report tabs">
+        <button class="tab is-active" data-tab="text" type="button">Text</button>
+        <button class="tab" data-tab="geometry" type="button">Geometry</button>
+        <button class="tab" data-tab="vlm" type="button">Diff Analysis </button>
+        <button class="tab" data-tab="vlm-comparison" type="button">VLM Comparison</button>
+      </section>
+
+      <section class="summary-grid" id="summary-grid">
+        <article class="summary-card"><h2>Added</h2><p id="summary-added">-</p></article>
+        <article class="summary-card"><h2>Removed</h2><p id="summary-removed">-</p></article>
+        <article class="summary-card"><h2>Modified</h2><p id="summary-modified">-</p></article>
+        <article class="summary-card"><h2>Unchanged</h2><p id="summary-unchanged">-</p></article>
+      </section>
+
+      <section class="comparison-grid">
+        <article class="panel">
+          <div class="panel-header">
+            <h3>Baseline</h3>
+      
+            <div class="image-tools">
+              <button
+                type="button"
+                class="image-tool-button active"
+                data-view="baseline"
+                data-mode="zoom"
+              >
+                🔍 Zoom
+              </button>
+      
+              <button
+                type="button"
+                class="image-tool-button"
+                data-view="baseline"
+                data-mode="pan"
+              >
+                ✋ Hand
+              </button>
+      
+              <button
+                type="button"
+                class="image-tool-button"
+                data-view="baseline"
+                data-mode="reset"
+              >
+                ↺ Reset
+              </button>
+            </div>
+          </div>
+      
+          <div class="image-stage">
+            <div class="image-frame" id="baseline-frame">
+              <img id="baseline-image" alt="Baseline rendering" />
+              <canvas id="baseline-overlay"></canvas>
+            </div>
+          </div>
+        </article>
+      
+        <article class="panel">
+          <div class="panel-header">
+            <h3>Revision</h3>
+      
+            <div class="image-tools">
+              <button
+                type="button"
+                class="image-tool-button active"
+                data-view="revision"
+                data-mode="zoom"
+              >
+                🔍 Zoom
+              </button>
+      
+              <button
+                type="button"
+                class="image-tool-button"
+                data-view="revision"
+                data-mode="pan"
+              >
+                ✋ Hand
+              </button>
+      
+              <button
+                type="button"
+                class="image-tool-button"
+                data-view="revision"
+                data-mode="reset"
+              >
+                ↺ Reset
+              </button>
+            </div>
+          </div>
+      
+          <div class="image-stage">
+            <div class="image-frame" id="revision-frame">
+              <img id="revision-image" alt="Revision rendering" />
+              <canvas id="revision-overlay"></canvas>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section class="filters" id="filters"></section>
+
+      <section class="content-grid">
+        <article class="panel change-list-panel">
+          <div class="panel-header">
+            <h3>Change List</h3>
+            <p id="list-meta"></p>
+          </div>
+          <ul id="change-list" class="change-list"></ul>
+          <button id="load-more" class="load-more" type="button">Load more</button>
+        </article>
+
+        <article class="panel details-panel">
+          <h3>Selected Change</h3>
+          <pre id="change-details">Select a change to inspect details.</pre>
+        </article>
+      </section>
+      <p id="status" class="status">Loading reports...</p>
+    </main>
+
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>

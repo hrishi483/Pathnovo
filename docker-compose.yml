@@ -1,0 +1,11 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DELTA_CHAT_OUTPUT_DIR: /app/data/artifacts
+      DELTA_CHAT_RENDER_ZOOM: "2.0"
+      DELTA_CHAT_MIN_RESIDUAL_AREA: "64"
+    volumes:
+      - ./data/artifacts:/app/data/artifacts

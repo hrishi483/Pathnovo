@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Delta Chat Agent</title>
+    <link rel="stylesheet" href="/static/style.css" />
+    <link rel="stylesheet" href="/static/chat.css" />
+  </head>
+  <body>
+    <main class="app-shell chat-shell">
+      <header class="header">
+        <div>
+          <h1>Delta Chat Agent</h1>
+          <p>Ask questions about baseline vs revision document changes.</p>
+        </div>
+        <div class="header-actions">
+          <a class="nav-link" href="/">Delta Viewer</a>
+          <div class="run-picker">
+            <label for="pair-select">Document Pair</label>
+            <select id="pair-select"></select>
+          </div>
+        </div>
+      </header>
+
+      <section class="chat-layout">
+        <article class="panel chat-panel">
+          <div id="chat-log" class="chat-log" aria-live="polite"></div>
+          <form id="chat-form" class="chat-form">
+            <textarea
+              id="question-input"
+              rows="3"
+              placeholder="e.g. What is near Pump in the revised diagram?"
+              required
+            ></textarea>
+            <div class="chat-form-actions">
+              <button id="send-button" type="submit">Ask</button>
+              <button id="clear-button" type="button" class="secondary">
+                Clear
+              </button>
+            </div>
+          </form>
+          <p id="chat-status" class="status">Loading document pairs...</p>
+        </article>
+
+        <article class="panel trace-panel">
+          <h3>Tool Trace</h3>
+          <p class="trace-help">
+            Inspect tool calls used for the latest answer to judge retrieval
+            accuracy.
+          </p>
+          <div id="tool-trace" class="tool-trace">
+            <p class="empty-trace">No tool calls yet.</p>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <script src="/static/chat.js" defer></script>
+  </body>
+</html>
